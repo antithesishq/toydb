@@ -224,6 +224,10 @@ impl Server {
                         Ok(()) => {},
                         Err(crossbeam::channel::TrySendError::Full(_)) => {
                             error!("Raft peer channel full, dropping message");
+                            antithesis_sdk::assert_reachable!(
+                                "server: a Raft peer channel fills up and drops a message",
+                                &serde_json::json!({"node": node.id()})
+                            );
                         },
                         Err(crossbeam::channel::TrySendError::Disconnected(_)) => {
                             panic!("peer_tx disconnected");

@@ -545,6 +545,10 @@ impl<E: Engine> Transaction<E> {
             match Key::decode(&key)? {
                 Key::Version(_, version) => {
                     if !self.state.is_visible(version) {
+                        antithesis_sdk::assert_reachable!(
+                            "mvcc: a write conflicts with a concurrent transaction",
+                            &serde_json::json!({"txn": self.state.version, "conflicting_version": version})
+                        );
                         return Err(Error::Serialization);
                     }
                 }

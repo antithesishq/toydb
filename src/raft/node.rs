@@ -79,6 +79,13 @@ impl Node {
         opts: Options,
     ) -> Result<Self> {
         let node = RawNode::new(id, peers, log, state, tx, opts)?;
+        let (term, _) = node.log.get_term_vote();
+        let (commit_index, _) = node.log.get_commit_index();
+        antithesis_sdk::assert_sometimes!(
+            commit_index > 0,
+            "raft: a node restarts with committed entries in its log",
+            &serde_json::json!({"node": id, "term": term, "commit_index": commit_index})
+        );
         // If this is a single-node cluster, become leader immediately.
         if node.cluster_size() == 1 {
             return Ok(node.into_candidate()?.into_leader()?.into());
@@ -405,6 +412,10 @@ impl RawNode<Follower> {
                     // shorter than the base index, lower the reject index to
                     // skip all missing entries.
                     let reject_index = min(base_index, self.log.get_last_index().0 + 1);
+                    antithesis_sdk::assert_reachable!(
+                        "raft: a follower rejects an append whose base doesn't match its log",
+                        &serde_json::json!({"node": self.id, "term": msg.term, "base_index": base_index, "base_term": base_term})
+                    );
                     self.send(msg.from, Message::AppendResponse { reject_index, match_index: 0 })?;
                 }
             }
@@ -438,6 +449,10 @@ impl RawNode<Follower> {
                 // all committed entries. See section 5.4.1 in the Raft paper.
                 let (log_index, log_term) = self.log.get_last_index();
                 if log_term > last_term || log_term == last_term && log_index > last_index {
+                    antithesis_sdk::assert_reachable!(
+                        "raft: a vote is denied to a candidate with a stale log",
+                        &serde_json::json!({"node": self.id, "candidate": msg.from, "term": msg.term})
+                    );
                     self.send(msg.from, Message::CampaignResponse { vote: false })?;
                     return Ok(self.into());
                 }
@@ -498,6 +513,12 @@ impl RawNode<Follower> {
 
     /// Aborts all forwarded requests (e.g. on term/leader changes).
     fn abort_forwarded(&mut self) -> Result<()> {
+        if !self.role.forwarded.is_empty() {
+            antithesis_sdk::assert_reachable!(
+                "raft: a follower aborts forwarded requests on a leader change",
+                &serde_json::json!({"node": self.id, "term": self.term(), "count": self.role.forwarded.len()})
+            );
+        }
         // Sort by ID for test determinism.
         for id in std::mem::take(&mut self.role.forwarded).into_iter().sorted() {
             debug!("Aborting forwarded request {id}");
@@ -567,6 +588,11 @@ impl RawNode<Candidate> {
         assert_eq!(vote, Some(self.id), "leader did not vote for self");
 
         info!("Won election for term {term}, becoming leader");
+        antithesis_sdk::assert_sometimes!(
+            term > 2,
+            "raft: leadership changes after the first election",
+            &serde_json::json!({"node": self.id, "term": term})
+        );
         let peers = self.peers.clone();
         let (last_index, _) = self.log.get_last_index();
         let mut node = self.into_role(Leader::new(peers, last_index));
@@ -776,6 +802,15 @@ impl RawNode<Leader> {
     fn into_follower(mut self, term: Term) -> Result<RawNode<Follower>> {
         assert!(term > self.term(), "leader can only become follower in later term");
         info!("Discovered new term {term}");
+        antithesis_sdk::assert_reachable!(
+            "raft: a leader steps down after discovering a newer term",
+            &serde_json::json!({"node": self.id, "old_term": self.term(), "new_term": term})
+        );
+        antithesis_sdk::assert_sometimes!(
+            !self.role.writes.is_empty() || !self.role.reads.is_empty(),
+            "raft: a leader steps down with client requests in flight",
+            &serde_json::json!({"node": self.id, "writes": self.role.writes.len(), "reads": self.role.reads.len()})
+        );
 
         // Abort in-flight requests. The client must retry. Sort the requests
         // by ID for test determinism.
@@ -1090,6 +1125,12 @@ impl RawNode<Leader> {
         if progress.match_index == last_index {
             return Ok(());
         }
+        antithesis_sdk::assert_sometimes_greater_than!(
+            last_index - progress.match_index,
+            100,
+            "raft: a follower lags the leader by more than 100 entries",
+            &serde_json::json!({"peer": peer, "last_index": last_index, "match_index": progress.match_index})
+        );
 
         // If a probe was requested, but the base_index has already been
         // confirmed via match_index, there is no point in probing. Just send

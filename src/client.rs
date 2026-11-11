@@ -32,6 +32,29 @@ impl Client {
         Ok(Self { reader, writer, txn: None })
     }
 
+    /// Connects to a toyDB server with a timeout, which also applies to every
+    /// later read and write on the connection. A request that times out leaves
+    /// the connection in an unknown state, so the client must be discarded.
+    pub fn connect_timeout(addr: impl ToSocketAddrs, timeout: Duration) -> Result<Self> {
+        let mut last_error = None;
+        for addr in addr.to_socket_addrs()? {
+            match TcpStream::connect_timeout(&addr, timeout) {
+                Ok(socket) => {
+                    socket.set_read_timeout(Some(timeout))?;
+                    socket.set_write_timeout(Some(timeout))?;
+                    socket.set_nodelay(true)?;
+                    let reader = BufReader::new(socket.try_clone()?);
+                    let writer = BufWriter::new(socket);
+                    return Ok(Self { reader, writer, txn: None });
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error
+            .unwrap_or_else(|| std::io::Error::other("address resolved to nothing"))
+            .into())
+    }
+
     /// Sends a request to the server, returning the response.
     fn request(&mut self, request: Request) -> Result<Response> {
         request.encode_into(&mut self.writer)?;

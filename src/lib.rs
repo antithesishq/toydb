@@ -3,6 +3,10 @@
 #![allow(clippy::module_inception)]
 #![allow(clippy::type_complexity)]
 
+// Links the Antithesis coverage instrumentation runtime into every binary.
+#[cfg(feature = "antithesis-instrumentation")]
+use antithesis_instrumentation as _;
+
 pub mod client;
 pub mod encoding;
 pub mod error;

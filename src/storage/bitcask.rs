@@ -102,6 +102,10 @@ impl BitCask {
                 garbage_size as f64 / 1024.0 / 1024.0,
                 total_size as f64 / 1024.0 / 1024.0
             );
+            antithesis_sdk::assert_reachable!(
+                "bitcask: a log file is compacted on startup",
+                &serde_json::json!({"path": engine.log.path.display().to_string(), "garbage_size": garbage_size})
+            );
             engine.compact()?;
             info!(
                 "Compacted {} to size {:.1} MB",
@@ -323,6 +327,10 @@ impl Log {
                 // incomplete write and truncate the file.
                 Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
                     error!("Found incomplete entry at offset {offset}, truncating file");
+                    antithesis_sdk::assert_reachable!(
+                        "bitcask: an incomplete entry is truncated on recovery",
+                        &serde_json::json!({"offset": offset})
+                    );
                     self.file.set_len(offset)?;
                     break;
                 }

@@ -22,8 +22,31 @@ use toydb::sql;
 use toydb::storage;
 
 fn main() {
+    antithesis_sdk::antithesis_init();
+
+    // toyDB checks many Raft and storage invariants with panics. A panic in
+    // one of the server's threads would otherwise leave a half-dead node, so
+    // report it to Antithesis and exit the process.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        let location = info.location().map(|l| l.to_string()).unwrap_or_default();
+        antithesis_sdk::assert_unreachable!(
+            "a toyDB node never panics",
+            &serde_json::json!({"message": message, "location": location})
+        );
+        default_hook(info);
+        std::process::exit(101);
+    }));
+
     if let Err(error) = Command::parse().run() {
-        eprintln!("Error: {error}")
+        eprintln!("Error: {error}");
+        std::process::exit(1);
     }
 }
 

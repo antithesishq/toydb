@@ -13,7 +13,14 @@ publish = false
 [lib]
 doctest = false
 
+[features]
+# Links the Antithesis coverage instrumentation runtime. Enabled only by the
+# Antithesis build (antithesis/toydb/), together with its sancov rustflags.
+antithesis-instrumentation = ["dep:antithesis-instrumentation"]
+
 [dependencies]
+antithesis-instrumentation = { version = "0.1.1", optional = true }
+antithesis_sdk = { version = "0.4.0", default-features = false, features = ["full"] }
 bincode = { version = "2.0", features = ["serde"] }
 clap = { version = "4.5", features = ["cargo", "derive"] }
 config = "0.15"
@@ -29,6 +36,7 @@ rustyline = "18.0"
 rustyline-derive = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"
+serde_json = "1.0"
 simplelog = "0.12"
 uuid = { version = "1.21", features = ["serde", "v4"] }
 
@@ -37,7 +45,6 @@ escargot = "0.5"
 goldenscript = "0.8"
 hex = "0.4"
 paste = "1.0"
-serde_json = "1.0"
 tempfile = "3.25"
 test-case = "3.3"
 test_each_file = "0.3"

@@ -330,6 +330,12 @@ impl Log {
         for entry in entries {
             self.engine.set(&Key::Entry(entry.index).encode(), entry.encode())?;
         }
+        if first.index <= self.last_index {
+            antithesis_sdk::assert_reachable!(
+                "raft: a follower replaces conflicting uncommitted log entries",
+                &serde_json::json!({"first_index": first.index, "last_index": self.last_index, "commit_index": self.commit_index})
+            );
+        }
         for index in last.index + 1..=self.last_index {
             self.engine.delete(&Key::Entry(index).encode())?;
         }
