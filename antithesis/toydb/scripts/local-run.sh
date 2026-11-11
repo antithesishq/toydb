@@ -28,4 +28,5 @@ docker compose logs --no-color > "$out/compose.log"
 # Clean shutdown check: a stopped node should exit 0 or by SIGTERM (143), not be killed (137).
 docker compose stop
 docker compose ps -a --format '{{.Name}} {{.State}} {{.ExitCode}}' >> "$out/ps.txt"
+docker compose down -v --remove-orphans >/dev/null 2>&1
 echo "evidence in $out"
