@@ -97,6 +97,21 @@ acknowledgement. toyDB's MVCC, rollback and index maintenance behaved correctly.
 
 Run 1 used 13.2 compute hours.
 
+## Run 2: `47fc39328d076e0b23d1f5fbd8f1de00-67-0` (12 compute hours)
+
+The workload fixes held: instrumentation and symbols pass, and every data
+property (linearizable kv reads, bank, insert/delete visibility and
+durability, Raft catch-up) passes. The remaining failures are the two toyDB
+bugs above: restart panics (85 examples, a new follower-side variant) and
+nodes that can't serve after a peer restarts with a new IP (61 examples,
+including the final-phase read failures, which time out on every retry).
+
+Removed two exploration assertions that can't be reached:
+`bitcask: an incomplete entry is truncated on recovery` (needs a crash in the
+middle of a `write()`; process kills can't produce one) and `a read succeeds on
+retry once faults stop` (with toyDB as it is, final reads either succeed first
+time or stay stuck).
+
 ## Local observations (not yet confirmed in Antithesis)
 
 ### Raft peer connections have no write timeout (confirmed in Antithesis, see run 1)

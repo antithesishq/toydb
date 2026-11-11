@@ -327,10 +327,6 @@ impl Log {
                 // incomplete write and truncate the file.
                 Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
                     error!("Found incomplete entry at offset {offset}, truncating file");
-                    antithesis_sdk::assert_reachable!(
-                        "bitcask: an incomplete entry is truncated on recovery",
-                        &serde_json::json!({"offset": offset})
-                    );
                     self.file.set_len(offset)?;
                     break;
                 }

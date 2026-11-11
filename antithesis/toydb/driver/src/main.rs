@@ -551,15 +551,7 @@ impl Shared {
         let mut errors: Vec<String> = Vec::new();
         loop {
             match read() {
-                Ok(()) => {
-                    if !errors.is_empty() {
-                        assert_reachable!(
-                            "a read succeeds on retry once faults stop",
-                            &json!({"errors": errors})
-                        );
-                    }
-                    return Ok(());
-                }
+                Ok(()) => return Ok(()),
                 Err(e) => {
                     if errors.last() != Some(&e) {
                         errors.push(e);
