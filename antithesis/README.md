@@ -6,6 +6,37 @@
 container. Antithesis kills, stops and partitions the nodes
 (`--fault-tolerance high_availability`); the driver is excluded from faults.
 
+### Topology
+
+```text
+                 ┌──────────────────────────────────────────────┐
+                 │ driver  (fault-excluded, image toydb-driver) │
+                 │  hegel state machine, 1–6 concurrent workers │
+                 │  toyDB Client, 2 s timeout, conn pool/node   │
+                 │  /opt/antithesis/test/v1/main/               │
+                 │     first_start_workload → /workload-active  │
+                 └───────┬──────┬──────┬──────┬──────┬──────────┘
+              SQL :9601  │      │      │      │      │   (any node; followers
+                         ▼      ▼      ▼      ▼      ▼    forward to the leader)
+                     ┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐
+   faults: kill,     │toydb1││toydb2││toydb3││toydb4││toydb5│  image toydb-antithesis
+   stop, partition,  └──┬───┘└──┬───┘└──┬───┘└──┬───┘└──┬───┘  (instrumented, SDK
+   network/clock        └───────┴───────┴───────┴───────┘       assertions inside)
+                          Raft :9701, full mesh, one leader
+                          per term; Bitcask on /data, fsync on
+```
+
+- **6 containers** on one Compose network. Each node's config (id, peers
+  `toydbN:9701`, listen `0.0.0.0`) is written by `toydb/toydb/entrypoint.sh`
+  from `NODE_ID`; the node runs under tini (`init: true`) with no restart
+  policy, so Antithesis controls restarts. Data persists in the container
+  across kills, so restarts exercise Raft log/Bitcask recovery and compaction.
+- **Setup** (before setup complete): the driver waits for every node to
+  answer, creates the schema in one transaction, waits for every node to
+  serve reads, then reports setup complete and waits for `/workload-active`.
+- **Schema:** `kv(id, value)` with 8 keys, `account(id, balance)` with 8
+  accounts × 100, `item(id, grp INDEX)` starting empty (8 groups).
+
 **The driver** (`toydb/driver/`, Rust) is a [hegel](https://hegel.dev)
 concurrent state machine that uses toyDB's own `Client` in-process. Each rule
 draws a node and sends SQL to it; outcomes are recorded in a model:
