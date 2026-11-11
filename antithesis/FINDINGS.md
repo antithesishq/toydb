@@ -25,6 +25,18 @@ Suggested fix: a follower receiving a `ClientRequest` from another node should
 reply `ClientResponse { response: Err(Error::Abort) }` to the sender (as a
 candidate already does) instead of asserting.
 
+#### Second variant (run 2, `47fc39328d076e0b23d1f5fbd8f1de00-67-0`): restarted follower
+
+`src/raft/node.rs:484` "client response from non-leader", moment
+`7198617708285132630` @ vtime 35.48: toydb5 follows leader toydb4 in term 1 →
+stopped at 30.46 → restarted at 35.07, reloading term 1 with `leader: None` →
+toydb4 delivers a `ClientResponse` for a request toydb5 forwarded before the
+restart → `assert_eq!(Some(msg.from), self.role.leader)` panics. Same root
+cause: Raft messages queued across a restart arrive in the same term at a node
+whose volatile role state was reset. Suggested fix: a follower should ignore a
+`ClientResponse` it isn't waiting for (not in `forwarded`), and adopt
+`msg.from` as leader on any leader-only message in its current term.
+
 ### BUG: followers can't reach a restarted peer for ~15 min (stale Raft sockets)
 
 `every node's Raft log catches up with the leader once faults stop` fails (15
