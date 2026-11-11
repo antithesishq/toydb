@@ -59,14 +59,17 @@ traffic arrives from that peer for a few election timeouts), drop and re-dial
 the connection; also set a socket write timeout and TCP keepalive, and/or have
 the sender detect EOF on its socket.
 
-### Under investigation: committed inserts missing
+### Resolved (workload bug): "committed inserts missing"
 
-`acknowledged inserts are visible to every later read` and `a delete of a
-committed batch removes exactly its rows` fail together: a batch whose COMMIT
-was acknowledged is missing from later index reads, and a primary-key DELETE of
-it removes 0 rows (e.g. ids `[17,18,19]` at moment `13304024868958580` @ 18.51,
-with no leader change; and `[146]` at moment `3297190298469261901` @ 21.13).
-Root cause not yet determined (SUT vs workload model).
+`acknowledged inserts are visible to every later read`, `... survive once faults
+stop` and `a delete of a committed batch removes exactly its rows` were a driver
+race, not toyDB data loss. toydump of the leader's Raft log and MVCC state at the
+failing moments shows the batch committed (e.g. t32 inserts 17,18,19), then two
+concurrent driver deletes of the same batch (t41, t42): t41 committed, t42 lost a
+write conflict and rolled back. The driver picked the batch and marked it
+"delete sent" in two separate lock sections, and the loser's
+`Error::Serialization` reset the model to "not deleted", overwriting the winner's
+acknowledgement. toyDB's MVCC, rollback and index maintenance behaved correctly.
 
 ### Workload fixes after run 1
 
@@ -74,6 +77,13 @@ Root cause not yet determined (SUT vs workload model).
   on the first failed request. toyDB doesn't retry forwarded requests and
   expects clients to time out, so one timeout right after recovery isn't a
   violation. They now retry for up to 30 s and report the errors seen.
+- `delete_batch` now picks the batch and marks it in one critical section, and a
+  failed delete only resets its own state (see above).
+- `Every instrumented module has symbols` failed: binaries were built without
+  debug info, and `toysql`/`toydump` had no symbols. Images now build with
+  `CARGO_PROFILE_RELEASE_DEBUG=true` and copy every binary to `/symbols`.
+
+Run 1 used 13.2 compute hours.
 
 ## Local observations (not yet confirmed in Antithesis)
 

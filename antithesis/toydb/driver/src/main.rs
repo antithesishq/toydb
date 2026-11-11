@@ -352,8 +352,11 @@ impl Shared {
 
     /// Deletes the rows of one committed, not yet deleted batch in the group.
     fn delete_batch(&self, node: usize, grp: i64, pick: usize) {
+        // Pick the batch and mark its delete as sent in one critical section,
+        // so two concurrent calls never delete the same batch.
+        let sent = Instant::now();
         let (batch, ids) = {
-            let items = self.items.lock().unwrap_or_else(|e| e.into_inner());
+            let mut items = self.items.lock().unwrap_or_else(|e| e.into_inner());
             let candidates: Vec<usize> = items
                 .batches
                 .iter()
@@ -367,13 +370,12 @@ impl Shared {
                 return;
             }
             let batch = candidates[pick % candidates.len()];
+            items.batches[batch].delete = Some(DeleteState::Sent(sent));
             (batch, items.batches[batch].ids.clone())
         };
         let set_delete = |state| {
             self.items.lock().unwrap_or_else(|e| e.into_inner()).batches[batch].delete = state;
         };
-        let sent = Instant::now();
-        set_delete(Some(DeleteState::Sent(sent)));
         let predicate: Vec<String> = ids.iter().map(|id| format!("id = {id}")).collect();
         let result =
             self.cluster.execute(node, &format!("DELETE FROM item WHERE {}", predicate.join(" OR ")));
@@ -393,8 +395,14 @@ impl Shared {
                 assert_reachable!("a delete has an unknown outcome", &details);
             }
             Err(error) => {
+                // A definite failure (e.g. a serialization conflict): the
+                // delete didn't happen. Only this call's own Sent state is
+                // reset; the critical section above makes it the only one.
                 note_error(&error, "delete");
-                set_delete(None);
+                let mut items = self.items.lock().unwrap_or_else(|e| e.into_inner());
+                if items.batches[batch].delete == Some(DeleteState::Sent(sent)) {
+                    items.batches[batch].delete = None;
+                }
             }
         }
     }

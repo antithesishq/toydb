@@ -3,6 +3,8 @@ FROM rust:1-trixie AS build
 WORKDIR /src
 COPY . .
 WORKDIR /src/antithesis/toydb/driver
+# Antithesis symbolization needs debug info (source locations) in /symbols.
+ENV CARGO_PROFILE_RELEASE_DEBUG=true CARGO_PROFILE_RELEASE_STRIP=none
 # .cargo/config.toml here sets the Antithesis instrumentation flags and target.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/antithesis/toydb/driver/target \
