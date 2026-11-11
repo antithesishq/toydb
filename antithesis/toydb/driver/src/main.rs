@@ -44,6 +44,8 @@ const GROUPS: i64 = 8;
 const VERSIONS_KEPT: usize = 64;
 /// Chance per call that the eventually rule fires.
 const EVENTUALLY_P: f64 = 0.001;
+/// How long each read in the eventually retries before it counts as failed.
+const FINAL_READ_DEADLINE: Duration = Duration::from_secs(30);
 /// How long the eventually waits for the cluster to recover.
 const RECOVERY_DEADLINE: Duration = Duration::from_secs(300);
 
@@ -122,9 +124,9 @@ impl Shared {
         history.prune(now);
     }
 
-    /// Reads a key and checks the value against its history. Returns whether
-    /// the read succeeded.
-    fn get(&self, node: usize, key: i64, message_final: bool) -> bool {
+    /// Reads a key and checks the value against its history. Returns the
+    /// error if the read failed.
+    fn get(&self, node: usize, key: i64, message_final: bool) -> std::result::Result<(), String> {
         let start = Instant::now();
         let result = self
             .cluster
@@ -135,7 +137,7 @@ impl Shared {
             Ok(rows) => rows,
             Err(error) => {
                 note_error(&error, "get");
-                return false;
+                return Err(error.to_string());
             }
         };
         let got = match rows.as_slice() {
@@ -165,7 +167,7 @@ impl Shared {
                 &json!({"node": node, "key": key, "value": v})
             );
         }
-        true
+        Ok(())
     }
 
     // ---- bank -------------------------------------------------------------
@@ -233,7 +235,7 @@ impl Shared {
 
     /// Reads the whole bank in one snapshot (optionally as of a past version)
     /// and checks that no money was created, destroyed or overdrawn.
-    fn read_bank(&self, node: usize, as_of: Option<u64>, message_final: bool) -> bool {
+    fn read_bank(&self, node: usize, as_of: Option<u64>, message_final: bool) -> std::result::Result<(), String> {
         let begin = match as_of {
             Some(v) => format!("BEGIN READ ONLY AS OF SYSTEM TIME {v}"),
             None => "BEGIN READ ONLY".to_string(),
@@ -252,7 +254,7 @@ impl Shared {
             Ok(r) => r,
             Err(error) => {
                 note_error(&error, "read_bank");
-                return false;
+                return Err(error.to_string());
             }
         };
         let (sum, min, count) = match agg.as_slice() {
@@ -291,7 +293,7 @@ impl Shared {
                 &json!({"node": node})
             );
         }
-        true
+        Ok(())
     }
 
     // ---- items ------------------------------------------------------------
@@ -397,7 +399,7 @@ impl Shared {
         }
     }
 
-    fn read_group(&self, node: usize, grp: i64, message_final: bool) -> bool {
+    fn read_group(&self, node: usize, grp: i64, message_final: bool) -> std::result::Result<(), String> {
         let start = Instant::now();
         let result = self
             .cluster
@@ -408,7 +410,7 @@ impl Shared {
             Ok(rows) => rows.iter().filter_map(|r| r.first().copied().flatten()).collect(),
             Err(error) => {
                 note_error(&error, "read_group");
-                return false;
+                return Err(error.to_string());
             }
         };
         let items = self.items.lock().unwrap_or_else(|e| e.into_inner());
@@ -454,7 +456,7 @@ impl Shared {
             &json!({"node": node, "grp": grp})
         );
         assert_sometimes!(ids.len() > 50, "an item group grows past 50 rows", &json!({"grp": grp}));
-        true
+        Ok(())
     }
 
     // ---- eventually -------------------------------------------------------
@@ -505,27 +507,62 @@ impl Shared {
         );
         if serving.iter().all(|s| *s) {
             let nodes = self.cluster.len();
+            // A single request can time out right after recovery (toyDB doesn't
+            // retry forwarded requests; clients are expected to), so each read
+            // retries until a deadline before it counts as failed.
             for key in 0..KV_KEYS {
                 let node = key as usize % nodes;
-                if !self.get(node, key, true) {
-                    assert_unreachable!("a kv read fails once faults stop", &json!({"node": node, "key": key}));
+                if let Err(e) = self.retry_final(|| self.get(node, key, true)) {
+                    assert_unreachable!("a kv read fails once faults stop", &json!({"node": node, "key": key, "error": e}));
                 }
             }
             for node in 0..nodes {
-                if !self.read_bank(node, None, true) {
-                    assert_unreachable!("a bank read fails once faults stop", &json!({"node": node}));
+                if let Err(e) = self.retry_final(|| self.read_bank(node, None, true)) {
+                    assert_unreachable!("a bank read fails once faults stop", &json!({"node": node, "error": e}));
                 }
             }
             for grp in 0..GROUPS {
                 let node = grp as usize % nodes;
-                if !self.read_group(node, grp, true) {
-                    assert_unreachable!("an item read fails once faults stop", &json!({"node": node, "grp": grp}));
+                if let Err(e) = self.retry_final(|| self.read_group(node, grp, true)) {
+                    assert_unreachable!("an item read fails once faults stop", &json!({"node": node, "grp": grp, "error": e}));
                 }
             }
             self.check_converged();
         }
         log("eventually: ending the timeline");
         std::process::exit(0);
+    }
+
+    /// Retries a final-phase read until it succeeds or FINAL_READ_DEADLINE
+    /// passes, returning the errors seen.
+    fn retry_final(
+        &self,
+        mut read: impl FnMut() -> std::result::Result<(), String>,
+    ) -> std::result::Result<(), String> {
+        let deadline = Instant::now() + FINAL_READ_DEADLINE;
+        let mut errors: Vec<String> = Vec::new();
+        loop {
+            match read() {
+                Ok(()) => {
+                    if !errors.is_empty() {
+                        assert_reachable!(
+                            "a read succeeds on retry once faults stop",
+                            &json!({"errors": errors})
+                        );
+                    }
+                    return Ok(());
+                }
+                Err(e) => {
+                    if errors.last() != Some(&e) {
+                        errors.push(e);
+                    }
+                }
+            }
+            if Instant::now() > deadline {
+                return Err(errors.join("; "));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
     }
 
     /// Waits for every node's log to match the leader's and every committed
@@ -592,7 +629,7 @@ impl Workload {
         if self.s.quiescing.load(Ordering::SeqCst) {
             return;
         }
-        self.s.get(node, key, false);
+        let _ = self.s.get(node, key, false);
     }
 
     #[rule(weight = 4)]
@@ -613,7 +650,7 @@ impl Workload {
         if self.s.quiescing.load(Ordering::SeqCst) {
             return;
         }
-        self.s.read_bank(node, None, false);
+        let _ = self.s.read_bank(node, None, false);
     }
 
     #[rule(weight = 1)]
@@ -630,7 +667,7 @@ impl Workload {
             }
             versions[pick % versions.len()]
         };
-        self.s.read_bank(node, Some(version), false);
+        let _ = self.s.read_bank(node, Some(version), false);
     }
 
     #[rule(weight = 3)]
@@ -663,7 +700,7 @@ impl Workload {
         if self.s.quiescing.load(Ordering::SeqCst) {
             return;
         }
-        self.s.read_group(node, grp, false);
+        let _ = self.s.read_group(node, grp, false);
     }
 
     #[rule]
