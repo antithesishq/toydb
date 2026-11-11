@@ -1,0 +1,71 @@
+services:
+  toydb1:
+    container_name: toydb1
+    hostname: toydb1
+    platform: linux/amd64
+    build:
+      context: ../../..
+      dockerfile: antithesis/toydb/toydb/Dockerfile
+    image: toydb-antithesis:latest
+    # tini as PID 1 passes SIGTERM on, so `docker stop` shuts toyDB down.
+    init: true
+    environment:
+      NODE_ID: "1"
+      NODE_COUNT: "5"
+
+  toydb2:
+    container_name: toydb2
+    hostname: toydb2
+    platform: linux/amd64
+    image: toydb-antithesis:latest
+    # tini as PID 1 passes SIGTERM on, so `docker stop` shuts toyDB down.
+    init: true
+    environment:
+      NODE_ID: "2"
+      NODE_COUNT: "5"
+
+  toydb3:
+    container_name: toydb3
+    hostname: toydb3
+    platform: linux/amd64
+    image: toydb-antithesis:latest
+    # tini as PID 1 passes SIGTERM on, so `docker stop` shuts toyDB down.
+    init: true
+    environment:
+      NODE_ID: "3"
+      NODE_COUNT: "5"
+
+  toydb4:
+    container_name: toydb4
+    hostname: toydb4
+    platform: linux/amd64
+    image: toydb-antithesis:latest
+    # tini as PID 1 passes SIGTERM on, so `docker stop` shuts toyDB down.
+    init: true
+    environment:
+      NODE_ID: "4"
+      NODE_COUNT: "5"
+
+  toydb5:
+    container_name: toydb5
+    hostname: toydb5
+    platform: linux/amd64
+    image: toydb-antithesis:latest
+    # tini as PID 1 passes SIGTERM on, so `docker stop` shuts toyDB down.
+    init: true
+    environment:
+      NODE_ID: "5"
+      NODE_COUNT: "5"
+
+  driver:
+    container_name: driver
+    hostname: driver
+    platform: linux/amd64
+    build:
+      context: ../../..
+      dockerfile: antithesis/toydb/driver/Dockerfile
+    image: toydb-driver:latest
+    init: true
+    environment:
+      TOYDB_NODES: toydb1:9601,toydb2:9601,toydb3:9601,toydb4:9601,toydb5:9601
+    depends_on: [toydb1, toydb2, toydb3, toydb4, toydb5]

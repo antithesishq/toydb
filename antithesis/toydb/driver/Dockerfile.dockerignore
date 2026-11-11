@@ -1,0 +1,5 @@
+**/target
+.git
+cluster/*/data
+antithesis/**/runs
+antithesis/**/coverage

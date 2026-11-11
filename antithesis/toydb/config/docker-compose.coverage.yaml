@@ -1,0 +1,44 @@
+# Local loop only: LLVM coverage builds of the toyDB nodes, and SDK output
+# written locally. Use with COMPOSE_FILE=docker-compose.yaml:docker-compose.coverage.yaml
+services:
+  toydb1:
+    build:
+      context: ../../..
+      dockerfile: antithesis/toydb/toydb/Dockerfile
+      args: {COVERAGE: "1"}
+    image: toydb-antithesis:coverage
+    environment:
+      LLVM_PROFILE_FILE: /coverage/toydb1/%c%m.profraw
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /coverage/toydb1/sdk.jsonl
+    volumes: [coverage:/coverage]
+  toydb2:
+    image: toydb-antithesis:coverage
+    environment:
+      LLVM_PROFILE_FILE: /coverage/toydb2/%c%m.profraw
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /coverage/toydb2/sdk.jsonl
+    volumes: [coverage:/coverage]
+  toydb3:
+    image: toydb-antithesis:coverage
+    environment:
+      LLVM_PROFILE_FILE: /coverage/toydb3/%c%m.profraw
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /coverage/toydb3/sdk.jsonl
+    volumes: [coverage:/coverage]
+  toydb4:
+    image: toydb-antithesis:coverage
+    environment:
+      LLVM_PROFILE_FILE: /coverage/toydb4/%c%m.profraw
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /coverage/toydb4/sdk.jsonl
+    volumes: [coverage:/coverage]
+  toydb5:
+    image: toydb-antithesis:coverage
+    environment:
+      LLVM_PROFILE_FILE: /coverage/toydb5/%c%m.profraw
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /coverage/toydb5/sdk.jsonl
+    volumes: [coverage:/coverage]
+  driver:
+    environment:
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /tmp/sdk.jsonl
+      TOYDB_EVENTUALLY: ${TOYDB_EVENTUALLY:-off}
+      TOYDB_EVENTUALLY_AFTER: ${TOYDB_EVENTUALLY_AFTER:-}
+volumes:
+  coverage:

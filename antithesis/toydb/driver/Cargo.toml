@@ -1,0 +1,16 @@
+[package]
+name = "driver"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Antithesis workload driver for toyDB"
+
+# Its own workspace, so it never joins toyDB's.
+[workspace]
+
+[dependencies]
+antithesis-instrumentation = "0.1.1"
+antithesis_sdk = { version = "0.4.0", default-features = false, features = ["full"] }
+hegeltest = { version = "0.52.2", features = ["static-engine"] }
+serde_json = "1.0"
+toydb = { path = "../../.." }
